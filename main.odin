@@ -6,8 +6,10 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import "core:os"
-import rl "vendor:raylib"
 import "core:math"
+import "core:strconv"
+import "core:mem"
+import rl "vendor:raylib"
 
 /// This is a game in one file. I just want to finish something. Im tired of never finishing
 /// anything. SO Here is a simple game in one file.
@@ -21,10 +23,27 @@ SPRITES := map[string]Sprite {
 ENTITIES:= map[string]Entity {
 }
 TILES:= map[string]Tile{
+"WALL" = {
+    width = tile_size,
+    height = tile_size,
+    color = rl.GRAY,
+    t_type = .wall,
+    walkable = false,
+},
+"FLOOR" = {
+    width = tile_size,
+    height = tile_size,
+    color = rl.BLUE,
+    t_type = .floor,
+    walkable = true,
+}
 }
 temp_scene: Scene
 sw_toggle := false
 sh_toggle := false
+secret := false
+name_buffer: [128]u8 = {}
+name := cstring(&name_buffer[0])
 
 get_texture :: proc(name: string) -> rl.Texture2D {
     if t, t_ok := textures[name]; t_ok {
@@ -80,7 +99,8 @@ entity_draw :: proc(ent: Entity) {
 
 
 TileType :: enum {
-    grass
+    wall,
+    floor,
 }
 
 Tile :: struct {
@@ -126,21 +146,60 @@ scene_update :: proc(s: ^Scene) {
 }
 
 scene_load :: proc(name: string) -> Scene {
-    file_name, _ := strings.concatenate({name, ".json"})
+    file_name, _ := strings.concatenate({name, ".txt"});
 
-    data, success := os.read_entire_file_from_filename(file_name)
+    os.set_current_directory("levels")
+    data, success := os.read_entire_file_from_filename(file_name);
     if !success {
-        return {}
+        fmt.eprintln("Failed to load file:", file_name);
+        return {};
+    }
+    text := string(data)
+
+    lines := strings.split_lines(text);
+    if len(lines) < 3 {
+        fmt.eprintln("Not enough data in level file");
+        return {};
     }
 
-    s: Scene
+    width, _  := strconv.parse_int(lines[0])
+    height, _ := strconv.parse_int(lines[1])
 
-    err := json.unmarshal(data, &s)
-    if err != nil {
-        fmt.eprintfln("Error: %s", err)
+    if width <= 0 || height <= 0 {
+        fmt.eprintln("Invalid level dimensions");
+        return {};
     }
-    return s
+
+    s: Scene;
+    s.id = name;
+
+    for y in 0 ..< height {
+        if y + 2 >= len(lines) {
+            break;
+        }
+
+        row := lines[y + 2];
+        for x in 0 ..< min(width, len(row)) {
+            char := row[x];
+
+            if char == 'W' {
+                if tile, t_ok := TILES["WALL"]; t_ok {
+                    tile.pos = rl.Vector2{f32(x) * tile.width, f32(y) * tile.height};
+                    scene_add_tile(&s, tile);
+                }
+            }
+            if char == 'F' {
+                if tile, t_ok := TILES["FLOOR"]; t_ok {
+                    tile.pos = rl.Vector2{f32(x) * tile.width, f32(y) * tile.height};
+                    scene_add_tile(&s, tile);
+                }
+            }
+        }
+    }
+
+    return s;
 }
+
 
 scene_write :: proc(s: ^Scene) {
 
@@ -221,17 +280,7 @@ main :: proc() {
 	gs: GameState
 
 	init(&gs)
-
-    for i := 0; i < 100; i += 1 {
-        scene_add_tile(&gs.scene, {
-            pos      = {f32(i % 10) * tile_size, f32(i / 10) * tile_size},
-            width    = 32,
-            height   = 32,
-            color    = rl.GREEN,
-            walkable = true,
-        })
-    }
-    scene_write(&gs.scene)
+    gs.scene = scene_load("l1")
 
     rl.SetTargetFPS(120.0)
 
@@ -336,6 +385,9 @@ frame :: proc(gs: ^GameState) {
         }
         if rl.GuiValueBox({new_window_rec.x + 50, new_window_rec.y + 100, 100, 30}, "height", &temp_scene.height, 1, 200, sh_toggle) == 1 {
             sh_toggle = !sh_toggle
+        }
+        if rl.GuiTextInputBox({new_window_rec.x + 50, new_window_rec.y + 150, 100, 30}, nil, nil, nil, name, 12, &secret) == 1 {
+            temp_scene.id = strings.clone_from_cstring(cstring(&name_buffer[0]))
         }
     }
 
