@@ -16,11 +16,45 @@ import rl "vendor:raylib"
 
 // GLOBAL CONSTANTS
 
+player_spritesheet := #load("assets/player.png")
+
 tile_size: f32 = 32.0
 textures: map[string]rl.Texture2D
 SPRITES := map[string]Sprite {
 }
 ENTITIES:= map[string]Entity {
+"PLAYER" = {
+    id                = "player",
+    sprite            = {
+        sheet_name    = "../assets/player.png",
+        frame_rec     = {0, 0, 32, 32},
+        cur_frame     = 0,
+        frame_count   = 0,
+        frame_speed   = 45,
+        animation_row = 1.0,
+    },
+    rotation          = 0,
+    e_type            = .player,
+    aabb              = {0, 0, tile_size, tile_size},
+    active_ent        = true,
+    selected          = true,
+},
+"BLOCK" = {
+    id                = "block",
+    sprite            = {
+        sheet_name    = "../assets/block.png",
+        frame_rec     = {0, 0, 32, 32},
+        cur_frame     = 0,
+        frame_count   = 0,
+        frame_speed   = 0,
+        animation_row = 1.0,
+    },
+    rotation          = 0,
+    e_type            = .block,
+    aabb              = {0, 0, tile_size, tile_size},
+    active_ent        = true,
+    selected          = true,
+},
 }
 TILES:= map[string]Tile{
 "WALL" = {
@@ -42,8 +76,12 @@ temp_scene: Scene
 sw_toggle := false
 sh_toggle := false
 secret := false
-name_buffer: [128]u8 = {}
-name := cstring(&name_buffer[0])
+
+// UTIL FUNCTIONS
+
+pos_to_index :: proc(w, h: i32, pos: rl.Vector2) -> u32 {
+    return u32((f32(w) * pos.y) + pos.x)
+}
 
 get_texture :: proc(name: string) -> rl.Texture2D {
     if t, t_ok := textures[name]; t_ok {
@@ -63,7 +101,10 @@ get_texture :: proc(name: string) -> rl.Texture2D {
 // TYPES
 //
 
+// Sprite position is the actual draw position.
 Sprite :: struct {
+    pos           : rl.Vector2,
+    sheet_name    : string,
     sheet         : rl.Texture2D,
     frame_rec     : rl.Rectangle,
     cur_frame     : f32,
@@ -74,22 +115,49 @@ Sprite :: struct {
 
 
 EntityType :: enum {
-    default
+    player,
+    exit,
+    block,
+    teleporter,
 }
 
+// position in the entity class is where in the grid world this hoe be living
 Entity :: struct {
-    id       : string,
-    pos      : rl.Vector2,
-    sprite   : Sprite,
-    rotation : f32,
-    e_type   : EntityType,
-    aabb     : rl.Rectangle,
+    id                : string,
+    pos               : rl.Vector2,
+    idx               : u32,
+    sprite            : Sprite,
+    rotation          : f32,
+    e_type            : EntityType,
+    aabb              : rl.Rectangle,
+    push_dir          : rl.Vector2,
+    pushed            : bool,
+    player_standing_on: bool,
+    active_ent        : bool,
+    selected          : bool,
 }
 
-entity_update :: proc(ent: ^Entity) {
-    switch ent.e_type {
-    case .default:
-
+entity_update :: proc(s: ^Scene, ent: ^Entity) {
+    //
+    // @todo:cs Add the ability to push blocks
+    //
+    #partial switch ent.e_type {
+    case .player: {
+        if ent.selected {
+            if rl.IsKeyPressed(rl.KeyboardKey.A) {
+                ent^.pos.x -= tile_size
+            }
+            if rl.IsKeyPressed(rl.KeyboardKey.D) {
+                ent^.pos.x += tile_size
+            }
+            if rl.IsKeyPressed(rl.KeyboardKey.W) {
+                ent^.pos.y -= tile_size
+            }
+            if rl.IsKeyPressed(rl.KeyboardKey.S) {
+                ent^.pos.y += tile_size
+            }
+        }
+    }
     }
 }
 
@@ -119,12 +187,16 @@ tile_draw :: proc(tile: Tile) {
     rl.DrawRectangleLinesEx({tile.pos.x, tile.pos.y, tile.width, tile.height}, 1, rl.BLACK)
 }
 
+Clear_Conditions :: enum {
+    get_to_exit,
+}
 
 Scene :: struct {
     id: string,
     width, height: i32,
 	entities: [dynamic]Entity,
     tiles: [dynamic]Tile,
+    clear_condition: Clear_Conditions,
 }
 
 scene_draw :: proc(s: ^Scene) {
@@ -141,7 +213,7 @@ scene_update :: proc(s: ^Scene) {
         tile_update(&tile)
     }
     for &entity in s.entities {
-        entity_update(&entity)
+        entity_update(s, &entity)
     }
 }
 
@@ -192,6 +264,30 @@ scene_load :: proc(name: string) -> Scene {
                 if tile, t_ok := TILES["FLOOR"]; t_ok {
                     tile.pos = rl.Vector2{f32(x) * tile.width, f32(y) * tile.height};
                     scene_add_tile(&s, tile);
+                }
+            }
+            if char == 'P' {
+                if tile, t_ok := TILES["FLOOR"]; t_ok {
+                    tile.pos = rl.Vector2{f32(x) * tile.width, f32(y) * tile.height};
+                    scene_add_tile(&s, tile);
+                }
+                if ent, t_ok := ENTITIES["PLAYER"]; t_ok {
+                    ent.pos = rl.Vector2{f32(x) * tile_size, f32(y) * tile_size};
+                    ent.sprite.sheet = get_texture(ent.sprite.sheet_name)
+                    fmt.printf("%v\n", ent)
+                    scene_add_entity(&s, ent);
+                }
+            }
+            if char == 'B' {
+                if tile, t_ok := TILES["FLOOR"]; t_ok {
+                    tile.pos = rl.Vector2{f32(x) * tile.width, f32(y) * tile.height};
+                    scene_add_tile(&s, tile);
+                }
+                if ent, t_ok := ENTITIES["BLOCK"]; t_ok {
+                    ent.pos = rl.Vector2{f32(x) * tile_size, f32(y) * tile_size};
+                    ent.sprite.sheet = get_texture(ent.sprite.sheet_name)
+                    fmt.printf("%v\n", ent)
+                    scene_add_entity(&s, ent);
                 }
             }
         }
@@ -366,7 +462,7 @@ frame :: proc(gs: ^GameState) {
     //
     // Render
     //
-	rl.ClearBackground(rl.GRAY)
+	rl.ClearBackground(rl.RAYWHITE)
 	rl.BeginDrawing()
     rl.BeginMode2D(gs.camera)
 
@@ -374,22 +470,6 @@ frame :: proc(gs: ^GameState) {
 
     cursor_draw(gs)
     rl.EndMode2D()
-
-    if gs.new_level_t {
-        new_window_rec := rl.Rectangle{f32(rl.GetScreenWidth()/2 - 200), f32(rl.GetScreenHeight()/2 - 200), 400, 400}
-        if rl.GuiWindowBox(new_window_rec, "New Level") == 1 {
-            gs.new_level_t = false
-        }
-        if rl.GuiValueBox({new_window_rec.x + 50, new_window_rec.y + 50, 100, 30}, "width", &temp_scene.width, 1, 200, sw_toggle) == 1 {
-            sw_toggle = !sw_toggle
-        }
-        if rl.GuiValueBox({new_window_rec.x + 50, new_window_rec.y + 100, 100, 30}, "height", &temp_scene.height, 1, 200, sh_toggle) == 1 {
-            sh_toggle = !sh_toggle
-        }
-        if rl.GuiTextInputBox({new_window_rec.x + 50, new_window_rec.y + 150, 100, 30}, nil, nil, nil, name, 12, &secret) == 1 {
-            temp_scene.id = strings.clone_from_cstring(cstring(&name_buffer[0]))
-        }
-    }
 
 	rl.DrawText(rl.TextFormat("%.1f , %.1f", gs.cursor.x, gs.cursor.y), 10, 10, 10, rl.WHITE)
 	rl.DrawText(rl.TextFormat("%.1f , %.1f", gs.world_space_cursor.x, gs.world_space_cursor.y), 10, 25, 10, rl.WHITE)
