@@ -79,8 +79,8 @@ secret := false
 
 // UTIL FUNCTIONS
 
-pos_to_index :: proc(w, h: i32, pos: rl.Vector2) -> u32 {
-    return u32((f32(w) * pos.y) + pos.x)
+pos_to_index :: proc(w, h: int, pos: rl.Vector2) -> u32 {
+    return u32((f32(w) * pos.y / tile_size) + pos.x / tile_size)
 }
 
 get_texture :: proc(name: string) -> rl.Texture2D {
@@ -121,7 +121,10 @@ EntityType :: enum {
     teleporter,
 }
 
+//
 // position in the entity class is where in the grid world this hoe be living
+// @cleanup:cs There is a bunch of extra stuff in here atm.
+//
 Entity :: struct {
     id                : string,
     pos               : rl.Vector2,
@@ -137,34 +140,133 @@ Entity :: struct {
     selected          : bool,
 }
 
+//
+// This is a really big function. I dont really feel the need
+// to completely split it up. Again just want to make app
+// post something very simple to itch.io. So for the mean time
+// this finna be ugly as heck. Enjoy the read.
+//
 entity_update :: proc(s: ^Scene, ent: ^Entity) {
-    //
-    // @todo:cs Add the ability to push blocks
-    //
+
+    push_allowed := true
+
     #partial switch ent.e_type {
     case .player: {
         if ent.selected {
             if rl.IsKeyPressed(rl.KeyboardKey.A) {
-                ent^.pos.x -= tile_size
+                target := ent.sprite.pos - rl.Vector2{tile_size, 0}
+                idx := pos_to_index(s.width, s.height, target)
+                if s.tiles[idx].t_type == .floor {
+                    for &e in s.entities {
+                        if e.idx == ent.idx {
+                            continue
+                        }
+                        if e.idx == idx && e.e_type == .block {
+                            push := rl.Vector2{-tile_size, 0}
+                            push_idx := pos_to_index(s.width, s.height, e.sprite.pos + push)
+                            if s.tiles[push_idx].t_type == .wall {
+                                push_allowed = false
+                                continue
+                            }
+                            e.push_dir = push
+                        }
+                    }
+                    if push_allowed {
+                        ent^.idx = idx
+                        ent^.sprite.pos = target
+                    }
+                }
             }
             if rl.IsKeyPressed(rl.KeyboardKey.D) {
-                ent^.pos.x += tile_size
+                target := ent.sprite.pos + rl.Vector2{tile_size, 0}
+                idx := pos_to_index(s.width, s.height, target)
+                if s.tiles[idx].t_type == .floor {
+                    for &e in s.entities {
+                        if e.idx == ent.idx {
+                            continue
+                        }
+                        if e.idx == idx && e.e_type == .block {
+                            push := rl.Vector2{tile_size, 0}
+                            push_idx := pos_to_index(s.width, s.height, e.sprite.pos + push)
+                            if s.tiles[push_idx].t_type == .wall {
+                                push_allowed = false
+                                continue
+                            }
+                            e.push_dir = push
+                        }
+                    }
+                    if push_allowed {
+                        ent^.idx = idx
+                        ent^.sprite.pos = target
+                    }
+                }
             }
             if rl.IsKeyPressed(rl.KeyboardKey.W) {
-                ent^.pos.y -= tile_size
+                target := ent.sprite.pos - rl.Vector2{0, tile_size}
+                idx := pos_to_index(s.width, s.height, target)
+                if s.tiles[idx].t_type == .floor {
+                    for &e in s.entities {
+                        if e.idx == ent.idx {
+                            continue
+                        }
+                        if e.idx == idx && e.e_type == .block {
+                            push := rl.Vector2{0, -tile_size}
+                            push_idx := pos_to_index(s.width, s.height, e.sprite.pos + push)
+                            if s.tiles[push_idx].t_type == .wall {
+                                push_allowed = false
+                                continue
+                            }
+                            e.push_dir = push
+                        }
+                    }
+                    if push_allowed {
+                        ent^.idx = idx
+                        ent^.sprite.pos = target
+                    }
+
+                }
             }
             if rl.IsKeyPressed(rl.KeyboardKey.S) {
-                ent^.pos.y += tile_size
+                target := ent.sprite.pos + rl.Vector2{0, tile_size}
+                idx := pos_to_index(s.width, s.height, target)
+                if s.tiles[idx].t_type == .floor {
+                    for &e in s.entities {
+                        if e.idx == ent.idx {
+                            continue
+                        }
+                        if e.idx == idx && e.e_type == .block {
+                            push := rl.Vector2{0, tile_size}
+                            push_idx := pos_to_index(s.width, s.height, e.sprite.pos + push)
+                            if s.tiles[push_idx].t_type == .wall {
+                                push_allowed = false
+                                continue
+                            }
+                            e.push_dir = push
+                        }
+                    }
+                    if push_allowed {
+                        ent^.idx = idx
+                        ent^.sprite.pos = target
+                    }
+                }
             }
         }
+    }
+    case .block: {
+        ent^.sprite.pos += ent.push_dir
+        ent^.idx = pos_to_index(s.width, s.height, ent.sprite.pos)
+        ent.push_dir = {}
     }
     }
 }
 
 entity_draw :: proc(ent: Entity) {
-    rl.DrawTextureRec(ent.sprite.sheet, ent.sprite.frame_rec, ent.pos, rl.RAYWHITE)
+    rl.DrawTextureRec(ent.sprite.sheet, ent.sprite.frame_rec, ent.sprite.pos, rl.RAYWHITE)
 }
 
+//
+// TILES
+//
 
 TileType :: enum {
     wall,
@@ -187,13 +289,17 @@ tile_draw :: proc(tile: Tile) {
     rl.DrawRectangleLinesEx({tile.pos.x, tile.pos.y, tile.width, tile.height}, 1, rl.BLACK)
 }
 
+//
+// SCENES
+//
+
 Clear_Conditions :: enum {
     get_to_exit,
 }
 
 Scene :: struct {
     id: string,
-    width, height: i32,
+    width, height: int,
 	entities: [dynamic]Entity,
     tiles: [dynamic]Tile,
     clear_condition: Clear_Conditions,
@@ -237,13 +343,16 @@ scene_load :: proc(name: string) -> Scene {
     width, _  := strconv.parse_int(lines[0])
     height, _ := strconv.parse_int(lines[1])
 
+    fmt.print("Width: %d, Height: %d\n", width, height)
     if width <= 0 || height <= 0 {
         fmt.eprintln("Invalid level dimensions");
         return {};
     }
 
-    s: Scene;
-    s.id = name;
+    s: Scene
+    s.id = name
+    s.width = width
+    s.height = height
 
     for y in 0 ..< height {
         if y + 2 >= len(lines) {
@@ -272,7 +381,8 @@ scene_load :: proc(name: string) -> Scene {
                     scene_add_tile(&s, tile);
                 }
                 if ent, t_ok := ENTITIES["PLAYER"]; t_ok {
-                    ent.pos = rl.Vector2{f32(x) * tile_size, f32(y) * tile_size};
+                    ent.sprite.pos = rl.Vector2{f32(x) * tile_size, f32(y) * tile_size};
+                    ent.idx = pos_to_index(width, height, ent.sprite.pos)
                     ent.sprite.sheet = get_texture(ent.sprite.sheet_name)
                     fmt.printf("%v\n", ent)
                     scene_add_entity(&s, ent);
@@ -284,7 +394,8 @@ scene_load :: proc(name: string) -> Scene {
                     scene_add_tile(&s, tile);
                 }
                 if ent, t_ok := ENTITIES["BLOCK"]; t_ok {
-                    ent.pos = rl.Vector2{f32(x) * tile_size, f32(y) * tile_size};
+                    ent.sprite.pos = rl.Vector2{f32(x) * tile_size, f32(y) * tile_size};
+                    ent.idx = pos_to_index(width, height, ent.sprite.pos)
                     ent.sprite.sheet = get_texture(ent.sprite.sheet_name)
                     fmt.printf("%v\n", ent)
                     scene_add_entity(&s, ent);
@@ -329,10 +440,11 @@ scene_add_tile :: proc(s: ^Scene, t: Tile) {
     append(&s.tiles, t)
 }
 
-cursor_draw :: proc(gs: ^GameState) {
-    rl.DrawRectangleLinesEx({gs.game_cursor.x, gs.game_cursor.y, tile_size, tile_size}, 1, rl.RED)
-    rl.DrawCircleV(gs.game_cursor, 1, rl.BLUE)
-}
+
+
+//
+// GAME STATE STUFF
+//
 
 GameMode :: enum {
     menu,
@@ -343,27 +455,10 @@ GameMode :: enum {
 GameState :: struct {
 	cursor            : rl.Vector2,
     world_space_cursor: rl.Vector2,
-    game_cursor       : rl.Vector2,
 	camera            : rl.Camera2D,
 	scene             : Scene,
     mode              : GameMode,
     new_level_t       : bool,
-}
-
-camera_control :: proc(gs: ^GameState) {
-    gc_to_screen := rl.GetWorldToScreen2D(gs.game_cursor, gs.camera)
-    if gc_to_screen.x + tile_size/2 >= f32(rl.GetScreenWidth()) {
-        gs^.camera.offset.x -= tile_size
-    }
-    if gc_to_screen.x - tile_size/2 <= 0 {
-        gs^.camera.offset.x += tile_size
-    }
-    if gc_to_screen.y >= f32(rl.GetScreenHeight()) {
-        gs^.camera.offset.y -= tile_size
-    }
-    if gc_to_screen.y <= 0 {
-        gs^.camera.offset.y += tile_size
-    }
 }
 
 //
@@ -371,7 +466,7 @@ camera_control :: proc(gs: ^GameState) {
 //
 
 main :: proc() {
-	rl.InitWindow(800, 600, "Hello")
+	rl.InitWindow(768, 640, "Hello")
 
 	gs: GameState
 
@@ -387,7 +482,7 @@ main :: proc() {
 
 init :: proc(gs: ^GameState) {
     gs.camera = rl.Camera2D {
-        offset   = rl.Vector2{200, 150},
+        offset   = rl.Vector2{0, 0},
         target   = rl.Vector2(0),
         rotation = 0,
         zoom     = 2,
@@ -413,28 +508,16 @@ frame :: proc(gs: ^GameState) {
     #partial switch gs.mode {
     case .playing: {
         if rl.IsKeyPressed(rl.KeyboardKey.LEFT) {
-            gs.game_cursor.x -= tile_size
-        }
-        if rl.IsKeyPressedRepeat(rl.KeyboardKey.LEFT) {
-            gs.game_cursor.x -= tile_size
+            gs.camera.offset.x += 5
         }
         if rl.IsKeyPressed(rl.KeyboardKey.RIGHT) {
-            gs.game_cursor.x += tile_size
-        }
-        if rl.IsKeyPressedRepeat(rl.KeyboardKey.RIGHT) {
-            gs.game_cursor.x += tile_size
+            gs.camera.offset.x -= 5
         }
         if rl.IsKeyPressed(rl.KeyboardKey.DOWN) {
-            gs.game_cursor.y += tile_size
-        }
-        if rl.IsKeyPressedRepeat(rl.KeyboardKey.DOWN) {
-            gs.game_cursor.y += tile_size
+            gs.camera.offset.y += 5
         }
         if rl.IsKeyPressed(rl.KeyboardKey.UP) {
-            gs.game_cursor.y -= tile_size
-        }
-        if rl.IsKeyPressedRepeat(rl.KeyboardKey.UP) {
-            gs.game_cursor.y -= tile_size
+            gs.camera.offset.y -= 5
         }
     }
     case .editing: {
@@ -453,7 +536,6 @@ frame :: proc(gs: ^GameState) {
     // Update
     //
 
-    camera_control(gs)
     gs.cursor = rl.GetMousePosition()
     gs.world_space_cursor = rl.GetScreenToWorld2D(gs.cursor, gs.camera)
 
@@ -468,7 +550,6 @@ frame :: proc(gs: ^GameState) {
 
     scene_draw(&gs.scene)
 
-    cursor_draw(gs)
     rl.EndMode2D()
 
 	rl.DrawText(rl.TextFormat("%.1f , %.1f", gs.cursor.x, gs.cursor.y), 10, 10, 10, rl.WHITE)
